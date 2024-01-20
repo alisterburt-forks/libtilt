@@ -101,3 +101,27 @@ def wedge(
     dc_h, dc_w = dft_center(image_shape, rfft=False, fftshifted=True)
     in_wedge[dc_h, dc_w] = True
     return add_soft_edge_2d(in_wedge, smoothing_radius=smoothing_radius)
+
+
+def gaussian(
+    center: tuple[float, float] | None = None,
+    standard_deviation: float = 1,
+    image_shape: tuple[int, int] | int = (64, 64),
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    if isinstance(image_shape, int):
+        image_shape = (image_shape, image_shape)
+    if center is None:
+        center = dft_center(image_shape, rfft=False, fftshifted=True)
+    grid = coordinate_grid(
+        image_shape=image_shape,
+        center=center,
+        device=device,
+    )
+    sh, sw = standard_deviation, standard_deviation
+    h, w = grid[..., 0], grid[..., 1]
+    h2_norm = (h ** 2) / (2 * sh ** 2)
+    w2_norm = (w ** 2) / (2 * sw ** 2)
+    gaussian = torch.exp(-(h2_norm + w2_norm))
+    sum = einops.reduce(gaussian, pattern='... h w -> ... 1 1', reduction='sum')
+    return gaussian / sum
