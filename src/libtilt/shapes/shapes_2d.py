@@ -6,6 +6,7 @@ from libtilt.grids import coordinate_grid
 from .soft_edge import add_soft_edge_2d
 from .geometry_utils import _angle_between_vectors
 from libtilt.fft_utils import dft_center
+from libtilt.transformations import Rz
 
 
 def circle(
@@ -101,3 +102,37 @@ def wedge(
     dc_h, dc_w = dft_center(image_shape, rfft=False, fftshifted=True)
     in_wedge[dc_h, dc_w] = True
     return add_soft_edge_2d(in_wedge, smoothing_radius=smoothing_radius)
+
+
+def ellipse(
+    rotation: float = 0,
+    semiaxes: tuple[float, float] | float = (6, 3),
+    image_shape: tuple[int, int] | int = 32,
+    center: tuple[float, float] | None = (16, 16),
+    smoothing_radius: float = 0,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    if isinstance(image_shape, int):
+        image_shape = (image_shape, image_shape)
+    grid = coordinate_grid(
+        image_shape=image_shape,
+        center=center,
+        device=device,
+    )
+
+    # generate rotation matrix for 2D yx coordinates
+    R = Rz(angles_degrees=rotation, zyx=True).to(device)[0, 1:3, 1:3]
+
+    # rotate the grid
+    grid = torch.linalg.inv(R) @ einops.rearrange(grid, 'h w yx -> h w yx 1')
+    grid = einops.rearrange(grid, 'h w yx 1 -> h w yx')
+
+    # evaluate the function for the ellipse on the rotated grid
+    semiaxes = torch.tensor(semiaxes, device=device).float()
+    grid = einops.reduce((grid / semiaxes) ** 2, 'h w yx -> h w', reduction='sum')
+
+    # grid <= 1 is inside the ellipse
+    return add_soft_edge_2d(grid <= 1, smoothing_radius=smoothing_radius)
+
+
+
